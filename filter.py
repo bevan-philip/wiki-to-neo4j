@@ -38,9 +38,11 @@ if __name__ == "__main__":
     for item in tqdm(itemlist):
         redirect = item.getElementsByTagName('redirect')
         remove_elements = ["contributor", "comment", "parentid", "model", "format", "timestamp", "minor", "ns"]
+        text = item.getElementsByTagName('text')[0].firstChild.nodeValue
 
-        # Remove any redirect pages. Pollutes our data.
-        if len(redirect) >= 1:
+
+        # Remove any redirect or disambiguation pages. Pollutes our data.
+        if len(redirect) >= 1 or "{{disambig}}" in text.lower():
             parent = item.parentNode
             parent.removeChild(item)
         else:
@@ -50,6 +52,7 @@ if __name__ == "__main__":
                 # Certain tags may only be on some pages. This doesn't matter, we just ignore the error.
                 except Exception:
                     pass
+
 
     print("Writing cleaned XML to disk.")
     with open(args.dest, "w", encoding="utf-8") as writeFile:
