@@ -1,5 +1,5 @@
 from neo4j import GraphDatabase
-from xml.dom import minidom
+from lxml import etree, objectify
 import mwparserfromhell
 import nltk
 import sys
@@ -67,14 +67,20 @@ class Page:
 if __name__ == "__main__":
     # neoInst = Neo4JInterface("bolt://localhost:7687", "neo4j", "e")
 
-    xmldoc = minidom.parse('filtered_dump.xml')
-    itemlist = xmldoc.getElementsByTagName('page')
+    xmldoc = etree.parse('test.xml')
+    root = xmldoc.getroot()
+
+    # Strips the tags of namespaces. I don't need them.
+    for elem in root.iterdescendants():
+        elem.tag = etree.QName(elem).localname
+
+    itemlist = root.iterfind("page")
     i = 0
 
     for item in itemlist:
-        w_id = item.getElementsByTagName('id')[0].firstChild.nodeValue
-        title = item.getElementsByTagName('title')[0].firstChild.nodeValue
-        text = item.getElementsByTagName('text')[0].firstChild.nodeValue
+        w_id = item.find('id').text
+        title = item.find('title').text
+        text = item.find('revision').find('text').text
 
         PageInst = Page(w_id, title, text)
 
