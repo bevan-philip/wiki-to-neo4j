@@ -12,14 +12,9 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     print("Reading MediaWiki XML file.")
+    # Reads the MediaWiki file, and gets the root node.
     parsed = etree.parse(args.input)
     tree = parsed.getroot()
-
-    print("Stripping namespaces")
-    # Here, we strip all the namespace definitions. We have no need for this.
-    namespaces = tree.xpath('siteinfo/namespaces')
-    for elem in tqdm(namespaces):
-        elem.getparent().remove(elem)
 
     print("Cleaning up tags.")
     # tqdm adds a progress bar. Useful for such a long operation.
@@ -27,12 +22,29 @@ if __name__ == "__main__":
     for elem in tqdm(tree.iterdescendants()):
         elem.tag = etree.QName(elem).localname
 
+    print("Stripping namespaces")
+    # Here, we strip all the namespace definitions. We have no need for this.
+    namespaces = tree.xpath('siteinfo/namespaces')
+    for elem in tqdm(namespaces):
+        elem.getparent().remove(elem)
+
+    # Finds all pages with redirects, and removes them all.
     print("Removing pages with redirects")
     redirect = tree.xpath('page/redirect')
     for elem in tqdm(redirect):
         page = elem.getparent()
         page.getparent().remove(page)
 
+    # Finds all the text element, and if the page is simply a disambigation page,
+    # removes them.
+    print("Removes all disambiguation pages")
+    for elem in tqdm(tree.iterfind('.//%s' % "text")):
+        if "{{disambig}}" in elem.text.lower():
+            page = elem.getparent().getparent()
+            page.getparent().remove(page)
+
+    # Finds these specific tags, and removes them. 
+    # In-precise, but good enough.
     remove_elements = ["contributor", "comment", "parentid",
                        "model", "format", "timestamp", "minor", "ns"]
     print("Cleaning up unneeded information")
@@ -40,11 +52,7 @@ if __name__ == "__main__":
         for subelem in tree.iterfind('.//%s' % remove):
             subelem.getparent().remove(subelem)
 
-    for elem in tree.iterfind('.//%s' % "text"):
-        if "{{disambig}}" in elem.text.lower():
-            page = elem.getparent().getparent()
-            page.getparent().remove(page)
-
+    print("Writing cleaned XML file.")
     etree.cleanup_namespaces(tree)
-    with open("test.xml", "wb") as openFile:
+    with open(args.dest, "wb") as openFile:
         openFile.write(etree.tostring(tree, pretty_print=True))
