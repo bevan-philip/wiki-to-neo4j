@@ -102,32 +102,26 @@ class BigramChunker(nltk.ChunkParserI):
                      in zip(sentence, chunktags)]
         return nltk.chunk.conlltags2tree(conlltags)
 
-def traverse(t, links, active_v=""):
-    try:
-        t.label()
-    except AttributeError:
-        if t[1].startswith("V") and t[0] != "P":
-            active_v = t[0]
-        return (t, active_v)
-    else:
-        # Now we know that t.node is defined
-        if t.label() == "NP":
-            total_np_chunk = []
-            matches = ""
-            traversal = ()
-            for child in t:
-                if child[0] in links:
-                    matches += child[0] + " "
-                traversal = traverse(child, links, active_v)
-                total_np_chunk.append(traversal[0])
-            if len(matches) > 0:
-                print(traversal[1] + " rel " + matches)
+def traverse(t, links):
+    verb_links = []
+    active_verb = ""
+    # This assumes we're passing sentences.
+    for child in t:
+        if type(child) == tuple:
+            if child[1].startswith("V") or child[1].startswith("N"):
+                active_verb = child[0]
         else:
-            for child in t:
-                traversal = traverse(child, links, active_v)
-                if len(traversal) > 1:
-                    active_v = traversal[1]
-        return t.label()
+            # This also assume we only have NP chunks. Other chunks are removed.
+            if child.label() == "NP":
+                word = []
+                for np_child in child:
+                    if np_child[0] in links:
+                        word.append(np_child[0])
+                word = " ".join(word)
+                if len(word) > 0:
+                    verb_links.append([word, active_verb])
+                    active_verb = ""
+    return verb_links
 
 if __name__ == "__main__":
     # neoInst = Neo4JInterface("bolt://localhost:7687", "neo4j", "e")
@@ -145,10 +139,12 @@ if __name__ == "__main__":
     i = 0
 
     # Dataset to train BiggramChunker
+    print("Training chunker.")
     train_sents = nltk.corpus.conll2000.chunked_sents(
         "train.txt", chunk_types=['NP', 'VB'])
     bigram_chunker = BigramChunker(train_sents)
 
+    print("Parsing file.")
     for item in itemlist:
         # Retrieves the page ID, title and page text.
         w_id = item.find('id').text
@@ -171,7 +167,7 @@ if __name__ == "__main__":
         for sent in sentences:
             chunked = bigram_chunker.parse(sent)
             # print(PageInst.links())
-            traverse(chunked, PageInst.lookup_links())
+            print(traverse(chunked, PageInst.lookup_links()))
 
         i += 1 
         if i > 20:
