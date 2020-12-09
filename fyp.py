@@ -2,6 +2,7 @@ from neo4j import GraphDatabase
 from lxml import etree, objectify
 import mwparserfromhell
 import nltk
+import spacy
 import re
 import sys
 
@@ -96,40 +97,24 @@ class Page:
         return sentences
 
 
-class BigramChunker(nltk.ChunkParserI):
-    def __init__(self, train_sents):
-        train_data = [[(t, c) for _, t, c in nltk.chunk.tree2conlltags(sent)]
-                      for sent in train_sents]
-        self.tagger = nltk.BigramTagger(train_data)
+def traverse(doc, partial_links, links):
+    link_dependency = {}
 
-    def parse(self, sentence):  # [_code-unigram-chunker-parse]
-        pos_tags = [pos for (word, pos) in sentence]
-        tagged_pos_tags = self.tagger.tag(pos_tags)
-        chunktags = [chunktag for (pos, chunktag) in tagged_pos_tags]
-        conlltags = [(word, pos, chunktag) for ((word, pos), chunktag)
-                     in zip(sentence, chunktags)]
-        return nltk.chunk.conlltags2tree(conlltags)
-
-def traverse(t, partial_links, links):
-    verb_links = []
-    active_verb = ""
-    # This assumes we're passing sentences.
-    for child in t:
-        if type(child) == tuple:
-            if child[1].startswith("V") or child[1].startswith("N"):
-                active_verb = child[0]
-        else:
-            # This also assume we only have NP chunks. Other chunks are removed.
-            if child.label() == "NP" and active_verb != "":
-                word = []
-                for np_child in child:
-                    if np_child[0] in partial_links:
-                        word.append(np_child[0])
-                word = " ".join(word)
-                if len(word) > 0 and word in links:
-                    verb_links.append([word, active_verb])
-                    active_verb = ""
-    return verb_links
+    for chunk in doc.noun_chunks:
+        if chunk.root.dep_.endswith("obj") or chunk.root.dep_ == "attr":
+            link = []
+            dependency = chunk.root.head.text.lower()
+            for word in chunk.text.split(" "):
+                if word in partial_links:
+                    link.append(word)
+            link = " ".join(link)
+            if link in links:
+                if link in link_dependency:
+                    link_dependency[link].add(dependency)
+                else:
+                    link_dependency[link] = {dependency}
+    
+    return link_dependency
 
 if __name__ == "__main__":
     # neoInst = Neo4JInterface("bolt://localhost:7687", "neo4j", "e")
@@ -146,11 +131,8 @@ if __name__ == "__main__":
     itemlist = root.iterfind("page")
     i = 0
 
-    # Dataset to train BiggramChunker
-    print("Training chunker.")
-    train_sents = nltk.corpus.conll2000.chunked_sents(
-        "train.txt", chunk_types=['NP', 'VB'])
-    bigram_chunker = BigramChunker(train_sents)
+    # Setup and load spaCy model
+    nlp = spacy.load("en_core_web_sm")
 
     print("Parsing file.")
     for item in itemlist:
@@ -170,12 +152,7 @@ if __name__ == "__main__":
         
         # print(text)
 
-        sentences = PageInst.tokenize_text()
-
-        for sent in sentences:
-            chunked = bigram_chunker.parse(sent)
-            # print(PageInst.links())
-            print(traverse(chunked, PageInst.lookup_links(), PageInst.links()))
+        print(traverse(nlp(text), PageInst.lookup_links(), PageInst.links()))
 
         i += 1 
         if i > 20:
