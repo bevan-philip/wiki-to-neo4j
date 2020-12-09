@@ -46,6 +46,14 @@ class Page:
         self.title = title
         self.text = text
         self.wikicode = mwparserfromhell.parse(text)
+
+    def links(self):
+        r = []
+        for link in self.wikicode.filter_wikilinks():
+            link = link.title
+            if not link.startswith("File:"):
+                r.append(link)
+        return r
     
     def lookup_links(self):
         """
@@ -102,7 +110,7 @@ class BigramChunker(nltk.ChunkParserI):
                      in zip(sentence, chunktags)]
         return nltk.chunk.conlltags2tree(conlltags)
 
-def traverse(t, links):
+def traverse(t, partial_links, links):
     verb_links = []
     active_verb = ""
     # This assumes we're passing sentences.
@@ -112,13 +120,13 @@ def traverse(t, links):
                 active_verb = child[0]
         else:
             # This also assume we only have NP chunks. Other chunks are removed.
-            if child.label() == "NP":
+            if child.label() == "NP" and active_verb != "":
                 word = []
                 for np_child in child:
-                    if np_child[0] in links:
+                    if np_child[0] in partial_links:
                         word.append(np_child[0])
                 word = " ".join(word)
-                if len(word) > 0:
+                if len(word) > 0 and word in links:
                     verb_links.append([word, active_verb])
                     active_verb = ""
     return verb_links
@@ -167,7 +175,7 @@ if __name__ == "__main__":
         for sent in sentences:
             chunked = bigram_chunker.parse(sent)
             # print(PageInst.links())
-            print(traverse(chunked, PageInst.lookup_links()))
+            print(traverse(chunked, PageInst.lookup_links(), PageInst.links()))
 
         i += 1 
         if i > 20:
