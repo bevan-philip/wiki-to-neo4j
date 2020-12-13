@@ -5,6 +5,7 @@ import nltk
 import spacy
 import re
 import sys
+import math
 
 class Neo4JInterface:
     def __init__(self, uri, user, password):
@@ -19,34 +20,53 @@ class Neo4JInterface:
                 self._create_page, w_id, title, text)
             print(result)
 
-    def create_relationship(self, link_from, link_to):
+    def print_create_relationship(self, link_from, link_to, relation):
         with self.driver.session() as session:
             result = session.write_transaction(
-                self._create_relationship, link_from, link_to)
+                self._create_relationship, link_from, link_to, relation)
             print(result)
 
     @staticmethod
-    def _create_page(tx, page):
+    def _create_page(tx, w_id, title, text):
         result = tx.run("MERGE (n:Item { id: $id, name: $name })"
                         "ON CREATE SET n.text = $text  "
                         "ON MATCH SET n.text = $text  "
-                        "RETURN n.id, n.name ", id=page.w_id, name=page.title, text=page.text)
+                        "RETURN n.id, n.name ", id=w_id, name=title, text=text)
         return result.single()[0]
 
     @staticmethod
-    def _create_relationship(tx, link_from, link_to):
-        result = tx.run("MATCH (from:Item { name: $link_from })"
-                        "MATCH (to:Item { name: $link_to })"
-                        "MERGE (from)-[rel:LINKED]->(to)",
-                        "RETURN from.id", link_from=link_from, link_to=link_to)
+    def _create_relationship(tx, link_from, link_to, relation):
+        merge_query = "MERGE (from)-[rel:$RELATION]->(to)".replace("$RELATION", relation)
+        query = ("MATCH (from: Item { name: $link_from }) "
+                 "MATCH (to: Item { name: $link_to }) "
+                 "MERGE (from)-[rel:$RELATION]->(to)".replace("$RELATION", relation))
+
+        query += " RETURN from.id"
+        result = tx.run(query, link_from=link_from, link_to=link_to)
         return result.single()[0]
 
+def entropy(string):
+        "Calculates the Shannon entropy of a string"
+        # get probability of chars in string
+        prob = [ float(string.count(c)) / len(string) for c in dict.fromkeys(list(string)) ]
+        
+        # calculate the entropy
+        entropy = - sum([ p * math.log(p) / math.log(2.0) for p in prob ])
+        return entropy
+    
+def entropy_ideal(length):
+        "Calculates the ideal Shannon entropy of a string with given length"
+        prob = 1.0 / length
+        return -1.0 * length * prob * math.log(prob) / math.log(2.0)
+    
 class Page:
     def __init__(self, w_id, title, text):
         self.w_id = w_id
         self.title = title
         self.text = text
         self.wikicode = mwparserfromhell.parse(text)
+        self.full_links = self.links()
+        self.partial_links = self.lookup_links()
 
     def links(self):
         r = []
@@ -74,7 +94,7 @@ class Page:
         """
         Converts the text from Wikicode into plain text.
         """
-        filtered = self.wikicode.strip_code()
+        filtered = self.wikicode.strip_code(normalize=True)
         # Ensures all the words are split.
         filtered = filtered.replace("\n", " ").split(" ")
 
@@ -84,40 +104,55 @@ class Page:
         if filtered[0].startswith("left"):
             del filtered[0]
 
-        return " ".join(map(str, filtered))
+        # strip_code isn't fully perfect on our dataset. Occasionally, remnants of images
+        # sneak through as "thumb|XXXpx|Word", so we try and catch these instances, and
+        # extract the word from it, or otherwise remove the broken word entirely.
+        i = 0
+        while i < len(filtered):
+            if "thumb|" in filtered[i]:
+                filtered[i] = filtered[i].split("|")[-1]
+            if "File:" in filtered[i] or filtered[i].endswith("|left"):
+                del filtered[i]
+                i -= 1
+            i += 1
+            
+        return " ".join(map(str, filtered)).strip()
 
-    def tokenize_text(self):
+    def find_link_relation_word(self, nlp):
         """
-        Converts the word into a sentence, and then tokenizes
-        and tags the sentence.
+        It takes the current page, filters it by links, processes with spaCy NLP,
+        loops over all NP chunks, checks if it is a link, and finds the relation word
+        that links the current page to the link.
         """
-        sentences = nltk.sent_tokenize(self.process_text())
-        sentences = [nltk.word_tokenize(sent) for sent in sentences]
-        sentences = [nltk.pos_tag(sent) for sent in sentences]
-        return sentences
+        link_dependency = {}
 
+        # Parses the text with the spaCy NLP that is passed through.
+        doc = nlp(self.process_text())
 
-def traverse(doc, partial_links, links):
-    link_dependency = {}
+        for chunk in doc.noun_chunks:
+            # If the dependency type ends with "obj", it finds if there are
+            # any links within the NP chunk.
 
-    for chunk in doc.noun_chunks:
-        if chunk.root.dep_.endswith("obj") or chunk.root.dep_ == "attr":
-            link = []
-            dependency = chunk.root.head.text.lower()
-            for word in chunk.text.split(" "):
-                if word in partial_links:
-                    link.append(word)
-            link = " ".join(link)
-            if link in links:
-                if link in link_dependency:
-                    link_dependency[link].add(dependency)
-                else:
-                    link_dependency[link] = {dependency}
+            # If there are any links, it ensures they are complete links (i.e. not just
+            # part of a link). After that, it'll add the link and dependency to the 
+            # {link, set of dependencies}.
+            if chunk.root.dep_.endswith("obj") and chunk.root.head.text.isalpha():
+                link = []
+                dependency = chunk.root.head.text.upper()
+                for word in chunk.text.split(" "):
+                    if word in self.partial_links:
+                        link.append(word)
+                link = " ".join(link)
+                if link in self.full_links:
+                    if link in link_dependency:
+                        link_dependency[link].add(dependency)
+                    else:
+                        link_dependency[link] = {dependency}
+        
+        return link_dependency
     
-    return link_dependency
-
 if __name__ == "__main__":
-    # neoInst = Neo4JInterface("bolt://localhost:7687", "neo4j", "e")
+    neoInst = Neo4JInterface("bolt://localhost:7687", "neo4j", "e")
 
     xmldoc = etree.parse('test.xml')
     root = xmldoc.getroot()
@@ -129,34 +164,33 @@ if __name__ == "__main__":
 
     # Creates an iterator for all the page elements, so I can iterate over them.
     itemlist = root.iterfind("page")
-    i = 0
 
     # Setup and load spaCy model
     nlp = spacy.load("en_core_web_sm")
 
     print("Parsing file.")
+
+    # for item in itemlist:
+    #     # Retrieves the page ID, title and page text.
+    #     w_id = item.find('id').text
+    #     title = item.find('title').text
+    #     text = item.find('revision').find('text').text
+
+    #     PageInst = Page(w_id, title, text)
+    #     neoInst.print_create_page(w_id, title, text)
+
     for item in itemlist:
         # Retrieves the page ID, title and page text.
         w_id = item.find('id').text
         title = item.find('title').text
         text = item.find('revision').find('text').text
-
+        
         PageInst = Page(w_id, title, text)
 
-        print("================================")
-        print(PageInst.title)
-        print("================================")
-    #     neoInst.print_create_page(w_id, title, text)
-
-        text = PageInst.process_text()
-        
-        # print(text)
-
-        print(traverse(nlp(text), PageInst.lookup_links(), PageInst.links()))
-
-        i += 1 
-        if i > 20:
-            break
-    #     for link in links:
-    #         neoInst.create_relationship(title, str(link.title))
-    # neoInst.close()
+        link_dependency = PageInst.find_link_relation_word(nlp)
+        for link in link_dependency:
+            for relation in link_dependency[link]:
+                difference_in_entropy = entropy(relation) - entropy_ideal(len(relation))
+                print(relation, difference_in_entropy)
+    #             neoInst.print_create_relationship(title, link, relation)
+    neoInst.close()
