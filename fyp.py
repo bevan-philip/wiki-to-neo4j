@@ -6,6 +6,7 @@ import spacy
 import re
 import sys
 import math
+import enchant
 
 class Neo4JInterface:
     def __init__(self, uri, user, password):
@@ -31,7 +32,7 @@ class Neo4JInterface:
         result = tx.run("MERGE (n:Item { id: $id, name: $name })"
                         "ON CREATE SET n.text = $text  "
                         "ON MATCH SET n.text = $text  "
-                        "RETURN n.id, n.name ", id=w_id, name=title, text=text)
+                        "RETURN n.name, n.id ", id=w_id, name=title, text=text)
         return result.single()[0]
 
     @staticmethod
@@ -41,23 +42,12 @@ class Neo4JInterface:
                  "MATCH (to: Item { name: $link_to }) "
                  "MERGE (from)-[rel:$RELATION]->(to)".replace("$RELATION", relation))
 
-        query += " RETURN from.id"
+        query += " RETURN from.name, to.name"
         result = tx.run(query, link_from=link_from, link_to=link_to)
-        return result.single()[0]
-
-def entropy(string):
-        "Calculates the Shannon entropy of a string"
-        # get probability of chars in string
-        prob = [ float(string.count(c)) / len(string) for c in dict.fromkeys(list(string)) ]
-        
-        # calculate the entropy
-        entropy = - sum([ p * math.log(p) / math.log(2.0) for p in prob ])
-        return entropy
-    
-def entropy_ideal(length):
-        "Calculates the ideal Shannon entropy of a string with given length"
-        prob = 1.0 / length
-        return -1.0 * length * prob * math.log(prob) / math.log(2.0)
+        result = result.single()
+        if result is not None:
+            return result
+        return "No relationship created."
     
 class Page:
     def __init__(self, w_id, title, text):
@@ -118,21 +108,21 @@ class Page:
             
         return " ".join(map(str, filtered)).strip()
 
-    def find_link_relation_word(self, nlp):
+    def find_link_relation_word(self, max_dependencies, nlp, dictionary):
         """
         It takes the current page, filters it by links, processes with spaCy NLP,
         loops over all NP chunks, checks if it is a link, and finds the relation word
         that links the current page to the link.
         """
         link_dependency = {}
-
+        
         # Parses the text with the spaCy NLP that is passed through.
         doc = nlp(self.process_text())
 
         for chunk in doc.noun_chunks:
             # If the dependency type ends with "obj", it finds if there are
             # any links within the NP chunk.
-
+            
             # If there are any links, it ensures they are complete links (i.e. not just
             # part of a link). After that, it'll add the link and dependency to the 
             # {link, set of dependencies}.
@@ -143,12 +133,20 @@ class Page:
                     if word in self.partial_links:
                         link.append(word)
                 link = " ".join(link)
-                if link in self.full_links:
+                if link in self.full_links and dictionary.check(dependency) and len(dependency) > 1:
                     if link in link_dependency:
-                        link_dependency[link].add(dependency)
+                        if len(link_dependency[link]) >= max_dependencies:
+                            # Finds the minimum length word in the set. 
+                            min_word = min(link_dependency[link], key=len)
+                            # If the new dependency is bigger, we'll substitute it in.
+                            if len(min_word) < len(dependency):
+                                link_dependency[link].remove(min_word)
+                                link_dependency[link].add(dependency)
+                        else:
+                            link_dependency[link].add(dependency)
                     else:
                         link_dependency[link] = {dependency}
-        
+
         return link_dependency
     
 if __name__ == "__main__":
@@ -156,6 +154,9 @@ if __name__ == "__main__":
 
     xmldoc = etree.parse('test.xml')
     root = xmldoc.getroot()
+
+    # Creates an instance of the en_US dictionary.
+    dictionary = enchant.Dict("en_US")
 
     # Strips the tags of namespaces. Makes traversal easier.
     # We can still do this and be far more efficient than Minidom.
@@ -170,15 +171,17 @@ if __name__ == "__main__":
 
     print("Parsing file.")
 
-    # for item in itemlist:
-    #     # Retrieves the page ID, title and page text.
-    #     w_id = item.find('id').text
-    #     title = item.find('title').text
-    #     text = item.find('revision').find('text').text
+    for item in itemlist:
+        # Retrieves the page ID, title and page text.
+        w_id = item.find('id').text
+        title = item.find('title').text
+        text = item.find('revision').find('text').text
 
-    #     PageInst = Page(w_id, title, text)
-    #     neoInst.print_create_page(w_id, title, text)
+        neoInst.print_create_page(w_id, title, text)
 
+    print("Creating relationships")
+    # As the iterator is reset, we'll instantiate it again.
+    itemlist = root.iterfind("page")
     for item in itemlist:
         # Retrieves the page ID, title and page text.
         w_id = item.find('id').text
@@ -187,10 +190,8 @@ if __name__ == "__main__":
         
         PageInst = Page(w_id, title, text)
 
-        link_dependency = PageInst.find_link_relation_word(nlp)
+        link_dependency = PageInst.find_link_relation_word(2, nlp, dictionary)
         for link in link_dependency:
             for relation in link_dependency[link]:
-                difference_in_entropy = entropy(relation) - entropy_ideal(len(relation))
-                print(relation, difference_in_entropy)
-    #             neoInst.print_create_relationship(title, link, relation)
+                neoInst.print_create_relationship(title, link, relation)
     neoInst.close()
