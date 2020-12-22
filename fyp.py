@@ -25,7 +25,7 @@ class Neo4JInterface:
         with self.driver.session() as session:
             result = session.write_transaction(
                 self._create_relationship, link_from, link_to, relation)
-            print(result)
+            if result != None: print(result, "with relation:", relation)
 
     @staticmethod
     def _create_page(tx, w_id, title, text):
@@ -45,9 +45,7 @@ class Neo4JInterface:
         query += " RETURN from.name, to.name"
         result = tx.run(query, link_from=link_from, link_to=link_to)
         result = result.single()
-        if result is not None:
-            return result
-        return "No relationship created."
+        return result
     
 class Page:
     def __init__(self, w_id, title, text):
