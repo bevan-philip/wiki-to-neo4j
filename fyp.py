@@ -1,7 +1,6 @@
 from neo4j import GraphDatabase
 from lxml import etree, objectify
 import mwparserfromhell
-import nltk
 import spacy
 import re
 import sys
