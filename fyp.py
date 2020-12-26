@@ -54,13 +54,15 @@ class Page:
         self.wikicode = mwparserfromhell.parse(text)
         self.full_links = self.links()
         self.partial_links = self.lookup_links()
+        self.templates = self.wikicode.filter_templates()
 
     def links(self):
         r = []
         for link in self.wikicode.filter_wikilinks():
             link = link.title
             if not link.startswith("File:"):
-                r.append(link)
+                # If there is an anchor in the page, we remove it.
+                r.append(link.split("#", 1)[0])
         return r
     
     def lookup_links(self):
@@ -70,11 +72,9 @@ class Page:
         And there will be other components in the NP chunks, muddying lookup.
         """
         r = []
-        for link in self.wikicode.filter_wikilinks():
-            link = link.title
-            if not link.startswith("File:"):
-                for y in link.split(" "):
-                    r.append(y)
+        for link in self.full_links:
+            for y in link.split(" "):
+                r.append(y)
         return r
         
     def process_text(self):
