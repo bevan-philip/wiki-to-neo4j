@@ -186,8 +186,19 @@ if __name__ == "__main__":
         text = item.find('revision').find('text').text
         
         PageInst = Page(w_id, title, text)
-
         link_dependency = PageInst.find_link_relation_word(2, nlp, dictionary)
+       
+        for template in PageInst.templates:
+            # Not always the first link in a page.
+            if str(template.name).lower().startswith("infobox"):
+                for param in template.params:
+                    for link in param.value.filter_wikilinks():
+                        link = link.title.split("#", 1)[0]
+                        if not link.startswith("File:") and not link == title:
+                            # These dependencies can be multiple words, so we need to convert them to a valid format for relationships within Neo4J.
+                            dependency = str(param.name).upper().strip().replace(" ", "_")
+                            link_dependency[link] = {dependency}
+
         for link in link_dependency:
             for relation in link_dependency[link]:
                 neoInst.print_create_relationship(title, link, relation)
