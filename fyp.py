@@ -105,11 +105,18 @@ class Page:
             
         return " ".join(map(str, filtered)).strip()
 
-    def find_link_relation_word(self, max_dependencies, nlp, dictionary):
+    def rel_standardise(self, rel):
+        """
+        Changes relationships to a standard format, and changes any spaces to underscores.
+        """
+        return rel.upper().strip().replace(" ", "_")
+
+    def find_link_relation_word(self, max_deps, nlp, dictionary):
         """
         It takes the current page, filters it by links, processes with spaCy NLP,
         loops over all NP chunks, checks if it is a link, and finds the relation word
-        that links the current page to the link.
+        that links the current page to the link. It restricts the amount of relation words 
+        per link depending on the value of max_dependencies.
         """
         link_dependency = {}
         
@@ -125,14 +132,14 @@ class Page:
             # {link, set of dependencies}.
             if chunk.root.dep_.endswith("obj") and chunk.root.head.text.isalpha():
                 link = []
-                dependency = chunk.root.head.text.upper()
+                dependency = self.rel_standardise(chunk.root.head.text)
                 for word in chunk.text.split(" "):
                     if word in self.partial_links:
                         link.append(word)
                 link = " ".join(link)
                 if link in self.full_links and dictionary.check(dependency) and len(dependency) > 1:
                     if link in link_dependency:
-                        if len(link_dependency[link]) >= max_dependencies:
+                        if len(link_dependency[link]) >= max_deps:
                             # Finds the minimum length word in the set. 
                             min_word = min(link_dependency[link], key=len)
                             # If the new dependency is bigger, we'll substitute it in.
@@ -145,7 +152,24 @@ class Page:
                         link_dependency[link] = {dependency}
 
         return link_dependency
-    
+
+    def infobox_link_dep(self):
+        """
+        Finds the Infobox template within a page, and returns any links present within
+        the parameter value, along with the name of the parameter it originates from.
+        """
+        link_dependency = {}
+        for template in self.templates:
+            # Not always the first link in a page.
+            if str(template.name).lower().startswith("infobox"):
+                for param in template.params:
+                    for link in param.value.filter_wikilinks():
+                        link = link.title.split("#", 1)[0]
+                        if not link.startswith("File:") and not link == title:
+                            dependency = self.rel_standardise(str(param.name))
+                            link_dependency[link] = {dependency}
+        return link_dependency
+
 if __name__ == "__main__":
     neoInst = Neo4JInterface("bolt://localhost:7687", "neo4j", "e")
 
@@ -187,18 +211,13 @@ if __name__ == "__main__":
         
         PageInst = Page(w_id, title, text)
         link_dependency = PageInst.find_link_relation_word(2, nlp, dictionary)
-       
-        for template in PageInst.templates:
-            # Not always the first link in a page.
-            if str(template.name).lower().startswith("infobox"):
-                for param in template.params:
-                    for link in param.value.filter_wikilinks():
-                        link = link.title.split("#", 1)[0]
-                        if not link.startswith("File:") and not link == title:
-                            # These dependencies can be multiple words, so we need to convert them to a valid format for relationships within Neo4J.
-                            dependency = str(param.name).upper().strip().replace(" ", "_")
-                            link_dependency[link] = {dependency}
+        info_link_dependency = PageInst.infobox_link_dep()
 
+        # Overrides any links from the unstructured links with the structured links.
+        for link in info_link_dependency:
+            link_dependency[link] = info_link_dependency[link]
+
+        # Writes it all into the database.
         for link in link_dependency:
             for relation in link_dependency[link]:
                 neoInst.print_create_relationship(title, link, relation)
