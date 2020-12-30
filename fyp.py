@@ -14,10 +14,10 @@ class Neo4JInterface:
     def close(self):
         self.driver.close()
 
-    def print_create_page(self, w_id, title, text):
+    def print_create_page(self, w_id, title, text, page_type):
         with self.driver.session() as session:
             result = session.write_transaction(
-                self._create_page, w_id, title, text)
+                self._create_page, w_id, title, text, page_type)
             print(result)
 
     def print_create_relationship(self, link_from, link_to, relation):
@@ -27,16 +27,16 @@ class Neo4JInterface:
             if result != None: print(result, "with relation:", relation)
 
     @staticmethod
-    def _create_page(tx, w_id, title, text):
-        result = tx.run("MERGE (n:Item { id: $id, name: $name })"
+    def _create_page(tx, w_id, title, text, page_type):
+        query = "MERGE (n:$PTYPE { id: $id, name: $name })".replace("$PTYPE", page_type)
+        result = tx.run(query +
                         "ON CREATE SET n.text = $text  "
                         "ON MATCH SET n.text = $text  "
-                        "RETURN n.name, n.id ", id=w_id, name=title, text=text)
+                        "RETURN n.name, n.id ", id=w_id, name=title, text=text, ptype=page_type)
         return result.single()[0]
 
     @staticmethod
     def _create_relationship(tx, link_from, link_to, relation):
-        merge_query = "MERGE (from)-[rel:$RELATION]->(to)".replace("$RELATION", relation)
         query = ("MATCH (from: Item { name: $link_from }) "
                  "MATCH (to: Item { name: $link_to }) "
                  "MERGE (from)-[rel:$RELATION]->(to)".replace("$RELATION", relation))
@@ -197,8 +197,15 @@ if __name__ == "__main__":
         w_id = item.find('id').text
         title = item.find('title').text
         text = item.find('revision').find('text').text
+        page_type = "Page"
+        
+        PageInst = Page(w_id, title, text)
 
-        neoInst.print_create_page(w_id, title, text)
+        for template in PageInst.templates:
+            if str(template.name).lower().startswith("infobox"):
+                page_type = template.name.split(" ")[-1]
+
+        neoInst.print_create_page(w_id, title, text, page_type)
 
     print("Creating relationships")
     # As the iterator is reset, we'll instantiate it again.
