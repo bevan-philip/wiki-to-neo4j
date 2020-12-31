@@ -37,8 +37,8 @@ class Neo4JInterface:
 
     @staticmethod
     def _create_relationship(tx, link_from, link_to, relation):
-        query = ("MATCH (from: Item { name: $link_from }) "
-                 "MATCH (to: Item { name: $link_to }) "
+        query = ("MATCH (from { name: $link_from }) "
+                 "MATCH (to { name: $link_to }) "
                  "MERGE (from)-[rel:$RELATION]->(to)".replace("$RELATION", relation))
 
         query += " RETURN from.name, to.name"
@@ -203,7 +203,7 @@ if __name__ == "__main__":
 
         for template in PageInst.templates:
             if str(template.name).lower().startswith("infobox"):
-                page_type = template.name.split(" ")[-1]
+                page_type = template.name.split(" ")[-1].capitalize()
 
         neoInst.print_create_page(w_id, title, text, page_type)
 
