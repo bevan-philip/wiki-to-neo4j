@@ -188,7 +188,7 @@ if __name__ == "__main__":
     itemlist = root.iterfind("page")
 
     # Setup and load spaCy model
-    nlp = spacy.load("en_core_web_sm")
+    nlp = spacy.load("en_core_web_trf")
 
     print("Parsing file.")
 
