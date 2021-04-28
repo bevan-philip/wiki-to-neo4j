@@ -7,6 +7,9 @@ import sys
 import math
 import enchant
 
+"""
+The interface to the Neo4J database. 
+"""
 class Neo4JInterface:
     def __init__(self, uri, user, password):
         self.driver = GraphDatabase.driver(uri, auth=(user, password))
@@ -15,12 +18,15 @@ class Neo4JInterface:
         self.driver.close()
 
     def print_create_page(self, w_id, title, text, page_type):
+        # Calls the private create_page method, and uses it to create a page.
+        # Requires the ID of the wiki page, the title, text, and the type of page.
         with self.driver.session() as session:
             result = session.write_transaction(
                 self._create_page, w_id, title, text, page_type)
             print(result)
 
     def print_create_relationship(self, link_from, link_to, relation):
+        # Creates a relationship between two pages.
         with self.driver.session() as session:
             result = session.write_transaction(
                 self._create_relationship, link_from, link_to, relation)
@@ -37,6 +43,8 @@ class Neo4JInterface:
 
     @staticmethod
     def _create_relationship(tx, link_from, link_to, relation):
+        # Apparently the $RELATION won't be replaced by the tx.run variable substitution
+        # mechanism, therfore I've adopted this janky approach.
         query = ("MATCH (from { name: $link_from }) "
                  "MATCH (to { name: $link_to }) "
                  "MERGE (from)-[rel:$RELATION]->(to)".replace("$RELATION", relation))
@@ -171,9 +179,21 @@ class Page:
         return link_dependency
 
 if __name__ == "__main__":
-    neoInst = Neo4JInterface("bolt://localhost:7687", "neo4j", "e")
+    # Parses the arguments for input file.
+    parser = argparse.ArgumentParser()
+    parser.add_argument('input', type=str,
+                        help='name of input filename')
+    parser.add_argument('neo4j_address', type=str,
+                        help='address of the neo4j server')
+    parser.add_argument('neo4j_username', type=str,
+                        help='username of neo4j server')
+    parser.add_argument('neo4j_password', type=str,
+                        help='neo4j db password')
+    args = parser.parse_args()
 
-    xmldoc = etree.parse('test.xml')
+    neoInst = Neo4JInterface(args.neo4j_address, args.neo4j_username, args.neo4j_password)
+    # The file that will be processed. 
+    xmldoc = etree.parse(args.input)
     root = xmldoc.getroot()
 
     # Creates an instance of the en_US dictionary.
@@ -188,7 +208,7 @@ if __name__ == "__main__":
     itemlist = root.iterfind("page")
 
     # Setup and load spaCy model
-    nlp = spacy.load("en_core_web_trf")
+    nlp = spacy.load("en_core_web_sm")
 
     print("Parsing file.")
 
@@ -202,7 +222,8 @@ if __name__ == "__main__":
         PageInst = Page(w_id, title, text)
 
         for template in PageInst.templates:
-            if str(template.name).lower().startswith("infobox"):
+            # If the infobox is annotated with a type, use it as the page type
+            if str(template.name).lower().startswith("infobox") and len(template.name) > 2:
                 page_type = template.name.split(" ")[-1].capitalize()
 
         neoInst.print_create_page(w_id, title, text, page_type)

@@ -9,6 +9,8 @@ if __name__ == "__main__":
                         help='name of input filename')
     parser.add_argument('dest', type=str,
                         help='name of destination filename')
+    parser.add_argument('ns', type=str,
+                        help='Namespace to preserve in output')
     args = parser.parse_args()
 
     print("Reading MediaWiki XML file.")
@@ -22,11 +24,18 @@ if __name__ == "__main__":
     for elem in tqdm(tree.iterdescendants()):
         elem.tag = etree.QName(elem).localname
 
-    print("Stripping namespaces")
+    print("Stripping namespace definition")
     # Here, we strip all the namespace definitions. We have no need for this.
     namespaces = tree.xpath('siteinfo/namespaces')
     for elem in tqdm(namespaces):
         elem.getparent().remove(elem)
+
+    print("Removing pages in namespaces other than {0}".format(args.ns))
+    ns = tree.xpath('page/ns')
+    for elem in tqdm(ns):
+        if elem.text != None and elem.text != args.ns:
+            page = elem.getparent()
+            page.getparent().remove(page)
 
     # Finds all pages with redirects, and removes them all.
     print("Removing pages with redirects")
@@ -39,7 +48,7 @@ if __name__ == "__main__":
     # removes them.
     print("Removes all disambiguation pages")
     for elem in tqdm(tree.iterfind('.//%s' % "text")):
-        if "{{disambig}}" in elem.text.lower():
+        if elem.text != None and "{{disambig}}" in elem.text.lower():
             page = elem.getparent().getparent()
             page.getparent().remove(page)
 
