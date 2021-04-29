@@ -239,6 +239,7 @@ if __name__ == "__main__":
 
         # Creates a page object
         PageInst = Page(w_id, title, text)
+        # Finds links on each page, with a relation word that links them together.
         link_dependency = PageInst.find_link_relation_word(2, nlp, dictionary)
         info_link_dependency = PageInst.infobox_link_dep()
 
