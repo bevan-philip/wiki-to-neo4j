@@ -236,7 +236,8 @@ if __name__ == "__main__":
         w_id = item.find('id').text
         title = item.find('title').text
         text = item.find('revision').find('text').text
-        
+
+        # Creates a page object
         PageInst = Page(w_id, title, text)
         link_dependency = PageInst.find_link_relation_word(2, nlp, dictionary)
         info_link_dependency = PageInst.infobox_link_dep()
