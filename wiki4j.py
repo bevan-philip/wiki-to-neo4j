@@ -6,6 +6,7 @@ import re
 import sys
 import math
 import enchant
+import argparse
 
 """
 The interface to the Neo4J database. 
