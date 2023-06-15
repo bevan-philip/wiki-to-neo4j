@@ -1,6 +1,6 @@
-# README
+# wiki-to-neo4j
 
-Wiki4j is a project that aims to convert a MediaWiki wiki dump, into a Neo4j database.
+wiki-to-neo4j is a project that convert a MediaWiki wiki dump, into a Neo4j database.
 
 It achieves this via extracting Infobox template information, and using natural language processing to get further information from the text on the page.
 
